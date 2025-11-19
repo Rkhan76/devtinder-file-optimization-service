@@ -43,11 +43,6 @@ Ideal for LinkedIn-style pre-upload flow
 * Cleans up unused files
 * Prevents storage waste
 
-### ✅ 5. Social App Ready
-
-Perfect for apps like:
-TikTok • Instagram • LinkedIn • Twitter
-
 ---
 
 ## 🏗️ Tech Stack
@@ -138,7 +133,7 @@ Response:
 Clone repository:
 
 ```bash
-git clone https://github.com/your-repo/devtinder-file-optimization-service.git
+git clone https://github.com/Rkhan76/devtinder-file-optimization-service.git
 cd devtinder-file-optimization-service
 ```
 
