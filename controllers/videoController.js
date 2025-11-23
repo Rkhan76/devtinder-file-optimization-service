@@ -5,6 +5,9 @@ import { PassThrough } from 'stream'
 export const optimizeVideo = async (req, res) => {
   console.log('Video optimization service started')
 
+  // ⭐ Start time
+  console.time('VIDEO_OPTIMIZATION_TIME')
+
   try {
     const ffmpegInput = new PassThrough()
     const ffmpegOutput = new PassThrough()
@@ -12,7 +15,6 @@ export const optimizeVideo = async (req, res) => {
     let receivedBytes = 0
     let responseSent = false
 
-    // Monitor incoming stream
     req.on('data', (chunk) => {
       receivedBytes += chunk.length
     })
@@ -25,6 +27,7 @@ export const optimizeVideo = async (req, res) => {
       console.error('Request stream error:', err)
       if (!responseSent) {
         responseSent = true
+        console.timeEnd('VIDEO_OPTIMIZATION_TIME') // END TIMER ON FAILURE
         res.status(500).json({
           success: false,
           message: 'Stream error',
@@ -32,52 +35,50 @@ export const optimizeVideo = async (req, res) => {
       }
     })
 
-    // Pipe request to FFmpeg input
     req.pipe(ffmpegInput)
 
-    // Set up Cloudinary upload
-   const cloudinaryUpload = cloudinary.uploader.upload_stream(
-     {
-       resource_type: 'video',
-       folder: 'devtinder/videos',
-       timeout: 600000,
-       chunk_size: 6_000_000,
-     },
-     (error, result) => {
-       if (responseSent) return
+    const cloudinaryUpload = cloudinary.uploader.upload_stream(
+      {
+        resource_type: 'video',
+        folder: 'devtinder/videos',
+        timeout: 600000,
+        chunk_size: 6_000_000,
+      },
+      (error, result) => {
+        if (responseSent) return
 
-       if (error) {
-         console.error('Cloudinary upload error:', error)
-         responseSent = true
-         return res.status(500).json({
-           success: false,
-           message: 'Upload failed',
-         })
-       }
+        if (error) {
+          console.error('Cloudinary upload error:', error)
+          responseSent = true
+          console.timeEnd('VIDEO_OPTIMIZATION_TIME')
+          return res.status(500).json({
+            success: false,
+            message: 'Upload failed',
+          })
+        }
 
-       console.log('Upload successful:', result.secure_url)
-       console.log('result ', result)
+        console.log('Upload successful:', result.secure_url)
 
-       responseSent = true
+        // ⭐ END TIME WHEN EVERYTHING FINISHES
+        console.timeEnd('VIDEO_OPTIMIZATION_TIME')
 
-       // ⭐ Return the MOST IMPORTANT fields
-       return res.status(200).json({
-         success: true,
-         url: result.secure_url, // final optimized media URL
-         publicId: result.public_id, // required for deleting
-         playbackUrl: result.playback_url, // HLS link for smooth streaming
-         type: result.resource_type, // "video"
-         width: result.width,
-         height: result.height,
-         format: result.format, // mp4, webp, jpeg etc
-         bytes: result.bytes,
-         duration: result.duration, // useful for video overlay
-       })
-     }
-   )
+        responseSent = true
 
+        return res.status(200).json({
+          success: true,
+          url: result.secure_url,
+          publicId: result.public_id,
+          playbackUrl: result.playback_url,
+          type: result.resource_type,
+          width: result.width,
+          height: result.height,
+          format: result.format,
+          bytes: result.bytes,
+          duration: result.duration,
+        })
+      }
+    )
 
-    // Configure and run FFmpeg
     ffmpeg(ffmpegInput)
       .inputFormat('mp4')
       .videoCodec('libx264')
@@ -93,10 +94,11 @@ export const optimizeVideo = async (req, res) => {
           console.log(`Processing: ${progress.percent.toFixed(2)}%`)
         }
       })
-      .on('error', (err, stdout, stderr) => {
+      .on('error', (err) => {
         console.error('FFmpeg error:', err.message)
         if (!responseSent) {
           responseSent = true
+          console.timeEnd('VIDEO_OPTIMIZATION_TIME')
           res.status(500).json({
             success: false,
             message: 'Video processing failed',
@@ -108,14 +110,13 @@ export const optimizeVideo = async (req, res) => {
       })
       .pipe(ffmpegOutput, { end: true })
 
-    // Pipe FFmpeg output to Cloudinary
     ffmpegOutput.pipe(cloudinaryUpload)
 
-    // Handle output stream errors
     ffmpegOutput.on('error', (err) => {
       console.error('Output stream error:', err)
       if (!responseSent) {
         responseSent = true
+        console.timeEnd('VIDEO_OPTIMIZATION_TIME')
         res.status(500).json({
           success: false,
           message: 'Processing error',
@@ -124,6 +125,7 @@ export const optimizeVideo = async (req, res) => {
     })
   } catch (err) {
     console.error('Unexpected error:', err)
+    console.timeEnd('VIDEO_OPTIMIZATION_TIME')
     if (!responseSent) {
       res.status(500).json({
         success: false,
