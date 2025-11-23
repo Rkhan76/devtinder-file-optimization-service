@@ -3,68 +3,107 @@ import streamifier from 'streamifier'
 import cloudinary from '../config/cloudinary.js'
 
 export const optimizeImage = async (req, res) => {
+  console.log('🖼️ Image optimization service started')
+  console.time('IMAGE_OPTIMIZATION_TIME')
+
+  let chunks = []
+  let responseSent = false
+  let cloudinaryUpload = null
+  let inputStreamCompleted = false
+
+  const cleanup = (status = 499, message = 'Upload canceled') => {
+    if (responseSent) return
+    responseSent = true
+
+    console.timeEnd('IMAGE_OPTIMIZATION_TIME')
+
+    try {
+      cloudinaryUpload?.end?.()
+    } catch {}
+
+    return res.status(status).json({
+      success: false,
+      message,
+    })
+  }
+
   try {
-    let fileBuffer = []
-
-    console.log('📥 Receiving streamed image...')
-
-    // Collect raw binary chunks
-    req.on('data', (chunk) => fileBuffer.push(chunk))
+    req.on('data', (chunk) => {
+      chunks.push(chunk)
+    })
 
     req.on('end', async () => {
+      inputStreamCompleted = true
+
       try {
-        const buffer = Buffer.concat(fileBuffer)
+        const buffer = Buffer.concat(chunks)
 
-        console.log('📦 Image received, size:', buffer.length)
+        console.log(`📥 Image received (${buffer.length} bytes)`)
+        console.log('✨ Optimizing image…')
 
-        // Optimize image using sharp
         const optimizedBuffer = await sharp(buffer)
           .resize(1080)
           .webp({ quality: 70 })
           .toBuffer()
 
-        console.log('✨ Optimized image, uploading to Cloudinary...')
+        console.log('☁️ Uploading optimized image to Cloudinary…')
 
-        // Upload optimized buffer
         const uploadPromise = () =>
           new Promise((resolve, reject) => {
-            const uploadStream = cloudinary.uploader.upload_stream(
+            cloudinaryUpload = cloudinary.uploader.upload_stream(
               {
                 resource_type: 'image',
                 folder: 'devtinder/images',
               },
               (error, result) => {
-                if (error) reject(error)
-                else resolve(result)
+                if (error) return reject(error)
+                resolve(result)
               }
             )
 
-            streamifier.createReadStream(optimizedBuffer).pipe(uploadStream)
+            streamifier.createReadStream(optimizedBuffer).pipe(cloudinaryUpload)
           })
 
-        const uploaded = await uploadPromise()
+        const result = await uploadPromise()
 
-        console.log('☁️ Uploaded:', uploaded.secure_url)
+        console.log('☁️ Image upload successful:', result.secure_url)
+        console.timeEnd('IMAGE_OPTIMIZATION_TIME')
 
-       return res.json({
-         success: true,
-         url: uploaded.secure_url, // Optimized final URL
-         publicId: uploaded.public_id, // Needed for deleting later
-         playbackUrl: uploaded.playback_url, // For HLS videos
-         type: uploaded.resource_type, // image / video
-         width: uploaded.width,
-         height: uploaded.height,
-         format: uploaded.format,
-         bytes: uploaded.bytes,
-         duration: uploaded.duration || null,
-       })
+        if (!responseSent) {
+          responseSent = true
+
+          return res.status(200).json({
+            success: true,
+            url: result.secure_url,
+            publicId: result.public_id, // FIXED
+            playbackUrl: result.playback_url,
+            type: result.resource_type, // FIXED ("image")
+            width: result.width,
+            height: result.height,
+            format: result.format,
+            bytes: result.bytes,
+            duration: result.duration || null,
+          })
+        }
       } catch (err) {
         console.error('❌ Image optimization error:', err)
-        return res.status(500).json({ success: false, error: err.message })
+        cleanup(500, 'Image processing failed')
       }
     })
+
+    req.on('close', () => {
+      if (!inputStreamCompleted && !responseSent) {
+        console.warn('⛔ Image upload canceled before completion')
+        cleanup(499, 'Upload canceled upstream')
+      }
+    })
+
+    req.on('error', (err) => {
+      console.error('❌ Request stream error:', err)
+      cleanup(500, 'Stream error')
+    })
   } catch (err) {
-    console.error('❌ SERVER ERROR:', err)
-    return res.status(500).json({ success: false, error: err.message })
+    console.error('❌ Unexpected microservice error:', err)
+    cleanup(500, 'Server error')
   }
 }
