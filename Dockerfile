@@ -1,13 +1,10 @@
-# ------------------------------
-# 1. Use Node.js base image
-# ------------------------------
-FROM node:18-slim
+# -----------------------------
+# 1. Builder Stage (Install deps)
+# -----------------------------
+FROM node:20-bookworm-slim AS builder
 
-# ------------------------------
-# 2. Install dependencies needed for sharp + ffmpeg
-# ------------------------------
+# Install system packages needed for sharp
 RUN apt-get update && apt-get install -y \
-    ffmpeg \
     build-essential \
     libcairo2-dev \
     libjpeg-dev \
@@ -18,32 +15,35 @@ RUN apt-get update && apt-get install -y \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
-# ------------------------------
-# 3. Create app directory
-# ------------------------------
 WORKDIR /app
 
-# ------------------------------
-# 4. Copy package files first (for cached installs)
-# ------------------------------
+# Copy package files and install dependencies
 COPY package*.json ./
-
-# ------------------------------
-# 5. Install dependencies
-# ------------------------------
 RUN npm install --production
 
-# ------------------------------
-# 6. Copy the rest of the app
-# ------------------------------
+# Copy app source code
 COPY . .
 
-# ------------------------------
-# 7. Expose port (match your server.js)
-# ------------------------------
+# -----------------------------
+# 2. Runtime Stage (Lightweight)
+# -----------------------------
+FROM node:20-bookworm-slim
+
+# Install ONLY what's needed for running ffmpeg
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libvips42 \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy node_modules from builder
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy the rest of the built app
+COPY --from=builder /app .
+
 EXPOSE 4000
 
-# ------------------------------
-# 8. Start the service
-# ------------------------------
 CMD ["npm", "start"]
