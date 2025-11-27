@@ -1,0 +1,24 @@
+app = "devtinder-file-optimizer"
+primary_region = "bom"
+
+[deploy]
+  strategy = "immediate"
+
+[env]
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 4000
+
+  [services.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 50
